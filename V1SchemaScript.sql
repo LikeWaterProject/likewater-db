@@ -21,26 +21,14 @@ ALTER TABLE [dbo].[Events]
       REFERENCES [dbo].[EventTypes] (eventType)
 GO
 
-CREATE TABLE [dbo].[EventConfirms](
+CREATE TABLE [dbo].[EventResponses](
 	[key] bigint identity(1,1) not null primary key,
 	[eventId] uniqueidentifier not null,
 	[userToken] nvarchar(255) not null,
-	[confirmedDt] bigint not null
+	[reportedActive] bit not null,
+	[responseDt] bigint not null
 )
-GO
-ALTER TABLE [dbo].[EventConfirms]
-   ADD CONSTRAINT FK_confirms_eventId FOREIGN KEY (eventId)
-      REFERENCES [dbo].[Events] (eventId)
-GO
-
-CREATE TABLE [dbo].[EventDismisses](
-	[key] bigint identity(1,1) not null primary key,
-	[eventId] uniqueidentifier not null,
-	[userToken] nvarchar(255) not null,
-	[dismissedDt] bigint not null
-)
-GO
-ALTER TABLE [dbo].[EventConfirms]
-   ADD CONSTRAINT FK_dismisses_eventId FOREIGN KEY (eventId)
+ALTER TABLE [dbo].[EventResponses]
+   ADD CONSTRAINT FK_responses_eventId FOREIGN KEY (eventId)
       REFERENCES [dbo].[Events] (eventId)
 GO
