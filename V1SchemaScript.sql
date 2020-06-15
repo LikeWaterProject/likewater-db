@@ -1,6 +1,7 @@
 
 CREATE TABLE [dbo].[EventTypes](
 	[eventType] nvarchar(100) not null primary key,
+	[eventCategory] nvarchar(100) not null,
 	[description] nvarchar(500) not null,
 	[showInApp] bit not null default 1
 )
