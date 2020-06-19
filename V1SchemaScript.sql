@@ -33,3 +33,140 @@ ALTER TABLE [dbo].[EventResponses]
    ADD CONSTRAINT FK_responses_eventId FOREIGN KEY (eventId)
       REFERENCES [dbo].[Events] (eventId)
 GO
+
+-- =========================================================
+-- Create Inline Function Template for Azure SQL Database
+-- =========================================================
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+-- =============================================
+-- Author:		LikeWater
+-- Create date: 
+-- Description:	Gets the list of active events based on a 
+--		Lat/Lon and a radius in miles.
+-- =============================================
+CREATE FUNCTION [GetEvents] 
+(	
+	-- Add the parameters for the function here
+	@userLat decimal(8,5),
+	@userLon decimal(8,5),
+	@radiusMiles integer,
+	@userToken nvarchar(255)
+)
+RETURNS @return table (
+	[eventId] [uniqueidentifier],
+	[eventType] [nvarchar](100),
+	[userToken] [nvarchar](255),
+	[eventDesc] [nvarchar](max),
+	[lat] [decimal](8, 5),
+	[lon] [decimal](8, 5),
+	[reportedDt] [bigint],
+	[confirmCount] int,
+	[dismissCount] int,
+	[lastConfirmDt] [bigint],
+	[lastDismissDt] [bigint],
+	[distance] decimal(10,4)
+)
+AS	
+begin 
+	---- Debug inputs to function
+	--Declare @userLat decimal(8,5) = 41;
+	--Declare @userLon decimal(8,5) = -74;
+	--declare @radiusFeet integer = 200;
+	--declare @userToken nvarchar(255);
+	---- end debug inputs
+
+	-- define additional variables needed
+	declare @confirmExtendRate integer = 600000; -- 10 minutes
+	declare @dismissReduceRate integer = 300000; -- 5 minutes
+	declare @autoDismissInterval integer = 3600000; -- 60 minutes
+
+	declare @initialDayFilter bigint; -- current date - 1 day, just used to improve query performance with large data
+	select @initialDayFilter = (cast(DATEDIFF(s, '1970-01-01', GETUTCDATE()) as bigint)*1000+datepart(ms,getutcdate())) - 86400000;
+	declare @currentDate bigint;
+	select @currentDate = (cast(DATEDIFF(s, '1970-01-01', GETUTCDATE()) as bigint)*1000+datepart(ms,getutcdate()));
+
+
+	-- first find the events that have been entered in the last 1 days along with the number of confirms/dimsisses
+	-- the two day filter is used to provide an initial reduction in possible record count and has no impact to the main logic
+	declare @recenEvents table(
+		[eventId] [uniqueidentifier],
+		[eventType] [nvarchar](100),
+		[userToken] [nvarchar](255),
+		[eventDesc] [nvarchar](max),
+		[lat] [decimal](8, 5),
+		[lon] [decimal](8, 5),
+		[reportedDt] [bigint],
+		[confirmCount] int,
+		[dismissCount] int,
+		[lastConfirmDt] [bigint],
+		[lastDismissDt] [bigint]
+	);
+	insert into @recenEvents(eventId, eventType, userToken, eventDesc, lat, lon, reportedDt, [confirmCount], [dismissCount], [lastConfirmDt], [lastDismissDt])
+	select distinct e.eventId, 
+		e.eventType, 
+		e.userToken, 
+		e.eventDesc, 
+		e.lat, 
+		e.lon, 
+		e.reportedDt,
+		confirms.confirmCount,
+		dismisses.dismissCount,
+		confirms.lastConfirmDt,
+		dismisses.lastDismissDt
+	from Events e
+		outer apply (select count([key]) over (partition by eventId) confirmCount,
+			max(responseDt) over (partition by eventId) lastConfirmDt
+			from EventResponses
+			where eventId = e.eventId
+			and reportedActive = 1)confirms
+		outer apply (select count([key]) over (partition by eventId) dismissCount,
+			max(responseDt) over (partition by eventId) lastDismissDt
+			from EventResponses
+			where eventId = e.eventId
+			and reportedActive = 0) dismisses
+	where e.reportedDt > @initialDayFilter -- Only look at stuff greater than 2 days ago, this is done only for performance reasons
+
+	--select * from  @recenEvents;
+
+	-- now take the reduced data and apply the show/hide logic based on time since creation, confirm aggrigate details, and dismiss aggrigate details
+	-- calculation: reportedTime > (currentTime - autoDismiss - (confirmExtendRate * confirmCount) + (dismissReduceRate * dismissCount))
+	declare @activeEvents table(
+		[eventId] [uniqueidentifier],
+		[eventType] [nvarchar](100),
+		[userToken] [nvarchar](255),
+		[eventDesc] [nvarchar](max),
+		[lat] [decimal](8, 5),
+		[lon] [decimal](8, 5),
+		[reportedDt] [bigint],
+		[confirmCount] int,
+		[dismissCount] int,
+		[lastConfirmDt] [bigint],
+		[lastDismissDt] [bigint]
+	)
+	insert into @activeEvents([eventId], [eventType], [userToken], [eventDesc], [lat], [lon], [reportedDt], [confirmCount], [dismissCount], [lastConfirmDt], [lastDismissDt])
+	select [eventId], [eventType], [userToken], [eventDesc], [lat], [lon], [reportedDt], [confirmCount], [dismissCount], [lastConfirmDt], [lastDismissDt]
+	from @recenEvents
+	where reportedDt > (@currentDate - @autoDismissInterval - (@confirmExtendRate * confirmCount) + (@dismissReduceRate * dismissCount))
+
+	--select * from @activeEvents
+
+	-- now return the set that is within the the givin radius
+	-- also remove any records already dismissed by the given user
+	insert into @return([eventId], [eventType], [userToken], [eventDesc], [lat], [lon], [reportedDt], [confirmCount], [dismissCount], [lastConfirmDt], [lastDismissDt], [distance])
+	SELECT ae.[eventId], [eventType], ae.[userToken], [eventDesc], [lat], [lon], [reportedDt], [confirmCount], [dismissCount], [lastConfirmDt], [lastDismissDt], 
+		-- currently distance is in miles, need to have this in feet
+		-- TBD
+		3963.0 * acos((sin(radians(@userLat)) * sin(radians(lat))) + cos(radians(@userLat)) * cos(radians(lat)) * cos(radians(lon) - radians(@userLon))) distance
+	FROM @activeEvents ae
+		left join EventResponses er -- left join onto er to remove the report from return if the current user has already dismissed the report
+		on er.eventId = ae.eventId
+		and reportedActive = 0
+		and er.userToken = @userToken
+	where er.eventId is null
+
+	return
+end
+GO
