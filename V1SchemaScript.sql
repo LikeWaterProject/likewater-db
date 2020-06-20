@@ -34,25 +34,26 @@ ALTER TABLE [dbo].[EventResponses]
       REFERENCES [dbo].[Events] (eventId)
 GO
 
--- =========================================================
--- Create Inline Function Template for Azure SQL Database
--- =========================================================
+/****** Object:  UserDefinedFunction [dbo].[GetEvents]    Script Date: 6/20/2020 5:37:14 PM ******/
 SET ANSI_NULLS ON
 GO
+
 SET QUOTED_IDENTIFIER ON
 GO
+
+
 -- =============================================
 -- Author:		LikeWater
 -- Create date: 
 -- Description:	Gets the list of active events based on a 
 --		Lat/Lon and a radius in miles.
 -- =============================================
-CREATE FUNCTION [GetEvents] 
+CREATE FUNCTION [dbo].[GetEvents] 
 (	
 	-- Add the parameters for the function here
 	@userLat decimal(8,5),
 	@userLon decimal(8,5),
-	@radiusMiles integer,
+	@radiusFeet bigint,
 	@userToken nvarchar(255)
 )
 RETURNS @return table (
@@ -67,21 +68,21 @@ RETURNS @return table (
 	[dismissCount] int,
 	[lastConfirmDt] [bigint],
 	[lastDismissDt] [bigint],
-	[distance] decimal(10,4)
+	[distance] decimal
 )
 AS	
 begin 
 	---- Debug inputs to function
-	--Declare @userLat decimal(8,5) = 41;
-	--Declare @userLon decimal(8,5) = -74;
-	--declare @radiusFeet integer = 200;
-	--declare @userToken nvarchar(255);
+	--Declare @userLat decimal(8,5) = 38.78713;
+	--Declare @userLon decimal(8,5) = -78.78141;
+	--declare @radiusFeet bigint = 1095369;
+	--declare @userToken nvarchar(255) = 'STMS111';
 	---- end debug inputs
 
 	-- define additional variables needed
-	declare @confirmExtendRate integer = 600000; -- 10 minutes
-	declare @dismissReduceRate integer = 300000; -- 5 minutes
-	declare @autoDismissInterval integer = 3600000; -- 60 minutes
+	declare @confirmExtendRate bigint = 600000; -- 10 minutes
+	declare @dismissReduceRate bigint = 300000; -- 5 minutes
+	declare @autoDismissInterval bigint = 3600000; -- 60 minutes
 
 	declare @initialDayFilter bigint; -- current date - 1 day, just used to improve query performance with large data
 	select @initialDayFilter = (cast(DATEDIFF(s, '1970-01-01', GETUTCDATE()) as bigint)*1000+datepart(ms,getutcdate())) - 86400000;
@@ -149,7 +150,7 @@ begin
 	insert into @activeEvents([eventId], [eventType], [userToken], [eventDesc], [lat], [lon], [reportedDt], [confirmCount], [dismissCount], [lastConfirmDt], [lastDismissDt])
 	select [eventId], [eventType], [userToken], [eventDesc], [lat], [lon], [reportedDt], [confirmCount], [dismissCount], [lastConfirmDt], [lastDismissDt]
 	from @recenEvents
-	where reportedDt > (@currentDate - @autoDismissInterval - (@confirmExtendRate * confirmCount) + (@dismissReduceRate * dismissCount))
+	where reportedDt > (@currentDate - @autoDismissInterval - (@confirmExtendRate * ISNULL(confirmCount, 0)) + (@dismissReduceRate * ISNULL(dismissCount, 0)))
 
 	--select * from @activeEvents
 
@@ -159,13 +160,14 @@ begin
 	SELECT ae.[eventId], [eventType], ae.[userToken], [eventDesc], [lat], [lon], [reportedDt], [confirmCount], [dismissCount], [lastConfirmDt], [lastDismissDt], 
 		-- currently distance is in miles, need to have this in feet
 		-- TBD
-		3963.0 * acos((sin(radians(@userLat)) * sin(radians(lat))) + cos(radians(@userLat)) * cos(radians(lat)) * cos(radians(lon) - radians(@userLon))) distance
+		(3963.0 * acos((sin(radians(@userLat)) * sin(radians(lat))) + cos(radians(@userLat)) * cos(radians(lat)) * cos(radians(lon) - radians(@userLon)))) * 5280 distance
 	FROM @activeEvents ae
 		left join EventResponses er -- left join onto er to remove the report from return if the current user has already dismissed the report
 		on er.eventId = ae.eventId
 		and reportedActive = 0
 		and er.userToken = @userToken
 	where er.eventId is null
+		and (3963.0 * acos((sin(radians(@userLat)) * sin(radians(lat))) + cos(radians(@userLat)) * cos(radians(lat)) * cos(radians(lon) - radians(@userLon))) * 5280) <= @radiusFeet
 
 	return
 end
