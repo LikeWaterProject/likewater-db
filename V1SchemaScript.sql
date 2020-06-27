@@ -1,14 +1,16 @@
 
 CREATE TABLE [dbo].[EventTypes](
-	[eventType] nvarchar(100) not null primary key,
+	[eventType] nvarchar(100) not null,
 	[eventCategory] nvarchar(100) not null,
 	[description] nvarchar(500) not null,
-	[showInApp] bit not null default 1
+	[showInApp] bit not null default 1,
+	primary key ([eventCategory],[eventType])
 )
 GO
 
 CREATE TABLE [dbo].[Events](
 	[eventId] uniqueidentifier not null primary key,
+	[eventCategory] nvarchar(100) not null,
 	[eventType] nvarchar(100) not null,
 	[userToken] nvarchar(255) not null,
 	[eventDesc] nvarchar(max) not null,
@@ -18,8 +20,8 @@ CREATE TABLE [dbo].[Events](
 )
 GO
 ALTER TABLE [dbo].[Events]
-   ADD CONSTRAINT FK_eventType FOREIGN KEY (eventType)
-      REFERENCES [dbo].[EventTypes] (eventType)
+   ADD CONSTRAINT FK_eventType FOREIGN KEY (eventCategory, eventType)
+      REFERENCES [dbo].[EventTypes] (eventCategory, eventType)
 GO
 
 CREATE TABLE [dbo].[EventResponses](
