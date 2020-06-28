@@ -61,6 +61,7 @@ CREATE FUNCTION [dbo].[GetEvents]
 RETURNS @return table (
 	[eventId] [uniqueidentifier],
 	[eventType] [nvarchar](100),
+	[eventCategory] nvarchar(100),
 	[userToken] [nvarchar](255),
 	[eventDesc] [nvarchar](max),
 	[lat] [decimal](8, 5),
@@ -97,6 +98,7 @@ begin
 	declare @recenEvents table(
 		[eventId] [uniqueidentifier],
 		[eventType] [nvarchar](100),
+		[eventCategory] nvarchar(100),
 		[userToken] [nvarchar](255),
 		[eventDesc] [nvarchar](max),
 		[lat] [decimal](8, 5),
@@ -107,16 +109,17 @@ begin
 		[lastConfirmDt] [bigint],
 		[lastDismissDt] [bigint]
 	);
-	insert into @recenEvents(eventId, eventType, userToken, eventDesc, lat, lon, reportedDt, [confirmCount], [dismissCount], [lastConfirmDt], [lastDismissDt])
+	insert into @recenEvents(eventId, eventType, eventCategory, userToken, eventDesc, lat, lon, reportedDt, [confirmCount], [dismissCount], [lastConfirmDt], [lastDismissDt])
 	select distinct e.eventId, 
 		e.eventType, 
+		e.eventCategory,
 		e.userToken, 
 		e.eventDesc, 
 		e.lat, 
 		e.lon, 
 		e.reportedDt,
-		confirms.confirmCount,
-		dismisses.dismissCount,
+		isnull(confirms.confirmCount, 0),
+		isnull(dismisses.dismissCount, 0),
 		confirms.lastConfirmDt,
 		dismisses.lastDismissDt
 	from Events e
@@ -139,6 +142,7 @@ begin
 	declare @activeEvents table(
 		[eventId] [uniqueidentifier],
 		[eventType] [nvarchar](100),
+		[eventCategory] [nvarchar](100),
 		[userToken] [nvarchar](255),
 		[eventDesc] [nvarchar](max),
 		[lat] [decimal](8, 5),
@@ -149,8 +153,8 @@ begin
 		[lastConfirmDt] [bigint],
 		[lastDismissDt] [bigint]
 	)
-	insert into @activeEvents([eventId], [eventType], [userToken], [eventDesc], [lat], [lon], [reportedDt], [confirmCount], [dismissCount], [lastConfirmDt], [lastDismissDt])
-	select [eventId], [eventType], [userToken], [eventDesc], [lat], [lon], [reportedDt], [confirmCount], [dismissCount], [lastConfirmDt], [lastDismissDt]
+	insert into @activeEvents([eventId], [eventType], [eventCategory], [userToken], [eventDesc], [lat], [lon], [reportedDt], [confirmCount], [dismissCount], [lastConfirmDt], [lastDismissDt])
+	select [eventId], [eventType], [eventCategory], [userToken], [eventDesc], [lat], [lon], [reportedDt], [confirmCount], [dismissCount], [lastConfirmDt], [lastDismissDt]
 	from @recenEvents
 	where reportedDt > (@currentDate - @autoDismissInterval - (@confirmExtendRate * ISNULL(confirmCount, 0)) + (@dismissReduceRate * ISNULL(dismissCount, 0)))
 
@@ -158,8 +162,8 @@ begin
 
 	-- now return the set that is within the the givin radius
 	-- also remove any records already dismissed by the given user
-	insert into @return([eventId], [eventType], [userToken], [eventDesc], [lat], [lon], [reportedDt], [confirmCount], [dismissCount], [lastConfirmDt], [lastDismissDt], [distance])
-	SELECT ae.[eventId], [eventType], ae.[userToken], [eventDesc], [lat], [lon], [reportedDt], [confirmCount], [dismissCount], [lastConfirmDt], [lastDismissDt], 
+	insert into @return([eventId], [eventType], [eventCategory], [userToken], [eventDesc], [lat], [lon], [reportedDt], [confirmCount], [dismissCount], [lastConfirmDt], [lastDismissDt], [distance])
+	SELECT ae.[eventId], [eventType], [eventCategory], ae.[userToken], [eventDesc], [lat], [lon], [reportedDt], [confirmCount], [dismissCount], [lastConfirmDt], [lastDismissDt], 
 		-- currently distance is in miles, need to have this in feet
 		-- TBD
 		(3963.0 * acos((sin(radians(@userLat)) * sin(radians(lat))) + cos(radians(@userLat)) * cos(radians(lat)) * cos(radians(lon) - radians(@userLon)))) * 5280 distance
